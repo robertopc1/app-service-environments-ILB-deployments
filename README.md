@@ -192,7 +192,7 @@ App Service Environment must always be deployed in its own subnet in the enterpr
     echo $JUMPBOX_SUBNET_NAME
    ```
 
-### 8. Deploy services: cosmos, sql, servicebus and storage
+### 8. Deploy services: cosmos, sql, azure managed redis, servicebus and storage
 
    ```bash
    # [This takes about five minutes to run.]
@@ -215,6 +215,8 @@ App Service Environment must always be deployed in its own subnet in the enterpr
     echo $RESOURCES_CONTAINER_NAME
     export SERVICEBUS_NAMESPACE_NAME=$(az deployment group show -g rg-app-service-environments-centralus -n services --query properties.outputs.serviceBusName.value -o tsv)
     echo $SERVICEBUS_NAMESPACE_NAME
+    export REDIS_NAME=$(az deployment group show -g rg-app-service-environments-centralus -n services --query properties.outputs.redisName.value -o tsv)
+    echo $REDIS_NAME
    ```
 
 ### 9. Uploads image to the storage account

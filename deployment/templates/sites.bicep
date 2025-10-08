@@ -31,15 +31,9 @@ param storageAccountName string
 @description('The name for the log analytics workspace')
 param logAnalyticsWorkspace string = '${uniqueString(resourceGroup().id)}la'
 
-@description('The availability zone to deploy. Valid values are: 1, 2 or 3. Use empty to not use zones.')
-param zoneRedundant bool = false
 
-var redisName = 'REDIS-${uniqueString(resourceGroup().id)}'
-var redisSubnetName = 'redis-subnet-${uniqueString(resourceGroup().id)}'
-var redisSubnetId = redisSubnet.id
-var redisNSGName = '${vnetName}-REDIS-NSG'
-var redisSecretName = 'RedisConnectionString'
 var cosmosKeySecretName = 'CosmosKey'
+var amrConnectionStringKeyName = 'RedisConnectionString'
 var serviceBusListenerConnectionStringSecretName = 'ServiceBusListenerConnectionString'
 var serviceBusSenderConnectionStringSecretName = 'ServiceBusSenderConnectionString'
 var votingApiName = 'votingapiapp-${uniqueString(resourceGroup().id)}'
@@ -52,152 +46,9 @@ var testWebPlanName = '${testWebName}-plan'
 var votingFunctionPlanName = '${votingFunctionName}-plan'
 var aseId = resourceId('Microsoft.Web/hostingEnvironments', aseName)
 
-resource redisNSG 'Microsoft.Network/networkSecurityGroups@2024-07-01' = {
-  name: redisNSGName
-  location: location
-  tags: {
-    displayName: redisNSGName
-  }
-  properties: {
-    securityRules: [
-      {
-        name: 'REDIS-inbound-vnet'
-        properties: {
-          description: 'Client communication inside vnet'
-          protocol: 'Tcp'
-          sourcePortRange: '*'
-          destinationPortRanges: [
-            '6379'
-            '6380'
-            '13000-13999'
-            '15000-15999'
-          ]
-          sourceAddressPrefix: 'VirtualNetwork'
-          destinationAddressPrefix: redisSubnetAddressPrefix
-          access: 'Allow'
-          priority: 200
-          direction: 'Inbound'
-        }
-      }
-      {
-        name: 'REDIS-inbound-loadbalancer'
-        properties: {
-          description: 'Allow communication from Load Balancer'
-          protocol: '*'
-          sourcePortRange: '*'
-          destinationPortRange: '*'
-          sourceAddressPrefix: 'AzureLoadBalancer'
-          destinationAddressPrefix: redisSubnetAddressPrefix
-          access: 'Allow'
-          priority: 201
-          direction: 'Inbound'
-        }
-      }
-      {
-        name: 'REDIS-inbound-allow_internal-communication'
-        properties: {
-          description: 'Internal communications for Redis'
-          protocol: 'Tcp'
-          sourcePortRange: '*'
-          destinationPortRanges: [
-            '6379'
-            '6380'
-            '8443'
-            '10221-10231'
-            '20226'
-          ]
-          sourceAddressPrefix: redisSubnetAddressPrefix
-          destinationAddressPrefix: redisSubnetAddressPrefix
-          access: 'Allow'
-          priority: 202
-          direction: 'Inbound'
-        }
-      }
-      {
-        name: 'REDIS-outbound-allow_storage'
-        properties: {
-          description: 'Redis dependencies on Azure Storage/PKI (Internet)'
-          protocol: 'Tcp'
-          sourcePortRange: '*'
-          destinationPortRanges: [
-            '80'
-            '443'
-          ]
-          sourceAddressPrefix: redisSubnetAddressPrefix
-          destinationAddressPrefix: '*'
-          access: 'Allow'
-          priority: 200
-          direction: 'Outbound'
-        }
-      }
-      {
-        name: 'REDIS-outbound-allow_DNS'
-        properties: {
-          description: 'Redis dependencies on DNS (Internet/VNet)'
-          protocol: '*'
-          sourcePortRange: '*'
-          destinationPortRange: '53'
-          sourceAddressPrefix: '*'
-          destinationAddressPrefix: '*'
-          access: 'Allow'
-          priority: 201
-          direction: 'Outbound'
-        }
-      }
-      {
-        name: 'REDIS-outbound-allow_ports-within-subnet'
-        properties: {
-          description: 'Internal communications for Redis'
-          protocol: 'Tcp'
-          sourcePortRange: '*'
-          destinationPortRange: '*'
-          sourceAddressPrefix: redisSubnetAddressPrefix
-          destinationAddressPrefix: redisSubnetAddressPrefix
-          access: 'Allow'
-          priority: 202
-          direction: 'Outbound'
-        }
-      }
-    ]
-  }
-}
-
-resource redisSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-07-01' = {
-  name: '${vnetName}/${redisSubnetName}'
-  properties: {
-    addressPrefix: redisSubnetAddressPrefix
-    defaultOutboundAccess: false
-    networkSecurityGroup: {
-      id: redisNSG.id
-    }
-  }
-}
-
-resource redis 'Microsoft.Cache/Redis@2024-11-01' = {
-  name: redisName
-  location: location
-  zones: (zoneRedundant ? ['1', '2', '3'] : null)
-  properties: {
-    sku: {
-      name: 'Premium'
-      family: 'P'
-      capacity: 3
-    }
-    enableNonSslPort: false
-    subnetId: redisSubnetId
-  }
-}
 
 resource keyVault 'Microsoft.KeyVault/vaults@2024-11-01' existing = {
   name: keyVaultName
-}
-
-resource keyVaultRedisSecret 'Microsoft.KeyVault/vaults/secrets@2024-11-01' = {
-  parent: keyVault
-  name: redisSecretName
-  properties: {
-    value: '${redisName}.redis.cache.windows.net:6380,abortConnect=false,ssl=true,password=${listKeys(redis.id, '2015-08-01').primaryKey}'
-  }
 }
 
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2025-02-01' = {
@@ -461,7 +312,7 @@ resource votingWebApp 'Microsoft.Web/sites@2024-11-01' = {
         }
         {
           name: 'ConnectionStrings:RedisConnectionString'
-          value: '@Microsoft.KeyVault(SecretUri=https://${keyVaultName}.vault.azure.net/secrets/${keyVaultRedisSecret.name})'
+          value: '@Microsoft.KeyVault(SecretUri=https://${keyVaultName}.vault.azure.net/secrets/${amrConnectionStringKeyName})'
         }
         {
           name: 'ConnectionStrings:queueName'
@@ -549,9 +400,6 @@ resource keyVaultAccessPolicy 'Microsoft.KeyVault/vaults/accessPolicies@2024-11-
   }
 }
 
-output redisName string = redisName
-output redisSubnetId string = redisSubnetId
-output redisSubnetName string = redisSubnetName
 output votingWebName string = votingWebName
 output testWebName string = testWebName
 output votingAppUrl string = '${votingWebName}.${aseDnsSuffix}'
